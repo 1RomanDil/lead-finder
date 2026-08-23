@@ -169,6 +169,33 @@ async def cmd_addcat(message: Message):
     save_data(data)
     await message.answer(f"Категория «{cat_name}» добавлена.")
 
+@dp.message(Command("delcat"))
+async def cmd_delcat(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2:
+        await message.answer("Использование:\n/delcat Название категории")
+        return
+
+    cat_name = parts[1].strip()
+
+    if cat_name not in data["categories"]:
+        await message.answer("Такой категории нет.")
+        return
+
+    # Удаляем категорию
+    del data["categories"][cat_name]
+
+    # Также убираем эту категорию у всех пользователей
+    for user in data["users"].values():
+        if cat_name in user.get("categories", []):
+            user["categories"].remove(cat_name)
+
+    save_data(data)
+    await message.answer(f"Категория «{cat_name}» удалена.")
+
 @dp.message(Command("addword"))
 async def cmd_addword(message: Message):
     if message.from_user.id != ADMIN_ID:
