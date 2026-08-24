@@ -3,7 +3,7 @@ import os
 import json
 from dotenv import load_dotenv
 
-from aiogram import Bot, Dispatcher, types, F
+from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -16,16 +16,15 @@ ADMIN_ID = int(os.getenv("ADMIN_ID"))
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Файл, в котором будем хранить данные
 DATA_FILE = "data.json"
 
-# Загружаем данные при старте
 def load_data():
     if not os.path.exists(DATA_FILE):
         return {
             "total_starts": 0,
-            "users": {},          # user_id: {"categories": []}
-            "categories": {}      # category_name: ["keyword1", "keyword2"]
+            "users": {},
+            "categories": {},
+            "chats": {}  # chat_id: {"title": "Название"}
         }
     with open(DATA_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
@@ -101,7 +100,6 @@ async def toggle_category(callback: CallbackQuery):
 
     save_data(data)
 
-    # Обновляем клавиатуру
     builder = InlineKeyboardBuilder()
     for cat in data["categories"].keys():
         mark = "✅ " if cat in user_cats else ""
@@ -142,11 +140,14 @@ async def cmd_stats(message: Message):
     for cat, keywords in data["categories"].items():
         cats_info += f"\n• {cat} ({len(keywords)} слов)"
 
+    chats_count = len(data.get("chats", {}))
+
     await message.answer(
         f"📊 Статистика\n\n"
         f"Всего нажали /start: {total}\n"
         f"В работе: {active}\n"
-        f"Просто зашли: {just_started}\n\n"
+        f"Просто зашли: {just_started}\n"
+        f"Чатов для мониторинга: {chats_count}\n\n"
         f"Категории:{cats_info if cats_info else ' пока нет'}"
     )
 
@@ -185,10 +186,8 @@ async def cmd_delcat(message: Message):
         await message.answer("Такой категории нет.")
         return
 
-    # Удаляем категорию
     del data["categories"][cat_name]
 
-    # Также убираем эту категорию у всех пользователей
     for user in data["users"].values():
         if cat_name in user.get("categories", []):
             user["categories"].remove(cat_name)
@@ -237,6 +236,71 @@ async def cmd_categories(message: Message):
         text += "\n\n"
 
     await message.answer(text, parse_mode="HTML")
+
+# ----- Работа с чатами -----
+
+@dp.message(Command("addchat"))
+async def cmd_addchat(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    parts = message.text.split(maxsplit=2)
+    if len(parts) < 3:
+        await message.answer(
+            "Использование:\n"
+            "/addchat ID_или_юзернейм Название чата\n\n"
+            "Примеры:\n"
+            "/addchat @durov Чат Дурова\n"
+            "/addchat -1001234567890 Мой чат заказов"
+        )
+        return
+
+    chat_id = parts[1].strip()
+    title = parts[2].strip()
+
+    if "chats" not in data:
+        data["chats"] = {}
+
+    data["chats"][chat_id] = {"title": title}
+    save_data(data)
+    await message.answer(f"Чат «{title}» добавлен для мониторинга.")
+
+@dp.message(Command("delchat"))
+async def cmd_delchat(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2:
+        await message.answer("Использование:\n/delchat ID_или_юзернейм")
+        return
+
+    chat_id = parts[1].strip()
+
+    if chat_id not in data.get("chats", {}):
+        await message.answer("Такой чат не найден.")
+        return
+
+    title = data["chats"][chat_id]["title"]
+    del data["chats"][chat_id]
+    save_data(data)
+    await message.answer(f"Чат «{title}» удалён из мониторинга.")
+
+@dp.message(Command("chats"))
+async def cmd_chats(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    chats = data.get("chats", {})
+    if not chats:
+        await message.answer("Чатов для мониторинга пока нет.")
+        return
+
+    text = "Список чатов для мониторинга:\n\n"
+    for chat_id, info in chats.items():
+        text += f"• {info['title']}\n  `{chat_id}`\n\n"
+
+    await message.answer(text, parse_mode="Markdown")
 
 # ========== ЗАПУСК ==========
 
