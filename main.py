@@ -12,6 +12,9 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from pyrogram import Client
 from pyrogram.errors import FloodWait, RPCError
 
+from fastapi import FastAPI
+import uvicorn
+
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -305,8 +308,6 @@ async def cmd_categories(message: Message):
 
     await message.answer(text, parse_mode="HTML")
 
-# ----- Слова-исключения -----
-
 @dp.message(Command("addexclude"))
 async def cmd_addexclude(message: Message):
     if message.from_user.id != ADMIN_ID:
@@ -316,9 +317,7 @@ async def cmd_addexclude(message: Message):
     if len(parts) < 2:
         await message.answer(
             "Использование:\n"
-            "/addexclude слово1, слово2, слово3\n\n"
-            "Пример:\n"
-            "/addexclude помогу, сделаю, предлагаю, готов"
+            "/addexclude слово1, слово2, слово3"
         )
         return
 
@@ -381,8 +380,6 @@ async def cmd_excludes(message: Message):
 
     text = "🚫 Слова-исключения:\n\n" + "\n".join(f"• {w}" for w in words)
     await message.answer(text)
-
-# ----- Чаты -----
 
 @dp.message(Command("addchat"))
 async def cmd_addchat(message: Message):
@@ -549,6 +546,14 @@ async def search_loop():
 
         await asyncio.sleep(120)
 
+# ========== ВЕБ-СЕРВЕР ДЛЯ RENDER ==========
+
+web_app = FastAPI()
+
+@web_app.get("/")
+async def health():
+    return {"status": "ok", "bot": "running"}
+
 # ========== ЗАПУСК ==========
 
 async def main():
@@ -557,7 +562,19 @@ async def main():
     print("Pyrogram клиент запущен")
 
     asyncio.create_task(search_loop())
-    await dp.start_polling(bot)
+
+    config = uvicorn.Config(
+        web_app,
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", 10000)),
+        log_level="info"
+    )
+    server = uvicorn.Server(config)
+
+    await asyncio.gather(
+        dp.start_polling(bot),
+        server.serve()
+    )
 
 if __name__ == "__main__":
     asyncio.run(main())
