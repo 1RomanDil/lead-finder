@@ -7,12 +7,23 @@ load_dotenv()
 api_id = int(os.getenv("API_ID"))
 api_hash = os.getenv("API_HASH")
 
-print("Запускаю создание сессии...")
-print("Сейчас попросит номер телефона и код из Telegram")
+print("Создаю новую сессию...")
 
-with Client("my_account", api_id=api_id, api_hash=api_hash) as app:
+app = Client(
+    "temp_session",
+    api_id=api_id,
+    api_hash=api_hash,
+    in_memory=True
+)
+
+with app:
     session_string = app.export_session_string()
-    print("\n\n========== ТВОЯ SESSION STRING ==========\n")
-    print(session_string)
-    print("\n=========================================")
-    print("\nСкопируй строку выше целиком")
+    
+    with open("session_string.txt", "w", encoding="utf-8") as f:
+        f.write(session_string)
+    
+    print("\n====================================")
+    print("Сессия успешно создана!")
+    print("Длина строки:", len(session_string))
+    print("Файл session_string.txt сохранён")
+    print("====================================")

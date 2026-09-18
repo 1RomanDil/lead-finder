@@ -1,7 +1,7 @@
 import asyncio
 import os
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 
 from aiogram import Bot, Dispatcher, F
@@ -23,8 +23,13 @@ SESSION_STRING = os.getenv("SESSION_STRING")
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Pyrogram клиент
-app = Client("my_account", session_string=SESSION_STRING, api_id=API_ID, api_hash=API_HASH)
+app = Client(
+    "lead_finder_session",
+    session_string=SESSION_STRING,
+    api_id=API_ID,
+    api_hash=API_HASH,
+    in_memory=True
+)
 
 DATA_FILE = "data.json"
 
@@ -35,10 +40,17 @@ def load_data():
             "users": {},
             "categories": {},
             "chats": {},
-            "last_check": None
+            "sent_messages": [],
+            "exclude_words": []
         }
     with open(DATA_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+        data = json.load(f)
+    
+    if "sent_messages" not in data:
+        data["sent_messages"] = []
+    if "exclude_words" not in data:
+        data["exclude_words"] = []
+    return data
 
 def save_data(data):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
@@ -147,6 +159,7 @@ async def cmd_stats(message: Message):
     active = sum(1 for u in data["users"].values() if u.get("categories"))
     just_started = total - active
     chats_count = len(data.get("chats", {}))
+    excludes_count = len(data.get("exclude_words", []))
 
     cats_info = ""
     for cat, keywords in data["categories"].items():
@@ -157,7 +170,8 @@ async def cmd_stats(message: Message):
         f"Всего нажали /start: {total}\n"
         f"В работе: {active}\n"
         f"Просто зашли: {just_started}\n"
-        f"Чатов для мониторинга: {chats_count}\n\n"
+        f"Чатов для мониторинга: {chats_count}\n"
+        f"Слов-исключений: {excludes_count}\n\n"
         f"Категории:{cats_info if cats_info else ' пока нет'}"
     )
 
@@ -228,6 +242,52 @@ async def cmd_addword(message: Message):
     save_data(data)
     await message.answer(f"Слово «{keyword}» добавлено в «{cat_name}».")
 
+@dp.message(Command("addwords"))
+async def cmd_addwords(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    parts = message.text.split(maxsplit=2)
+    if len(parts) < 3:
+        await message.answer(
+            "Использование:\n"
+            "/addwords Название_категории слово1, слово2, слово3"
+        )
+        return
+
+    cat_name = parts[1].strip()
+    raw_keywords = parts[2]
+
+    if cat_name not in data["categories"]:
+        await message.answer("Такой категории нет.")
+        return
+
+    keywords = [kw.strip().lower() for kw in raw_keywords.split(",") if kw.strip()]
+
+    if not keywords:
+        await message.answer("Не удалось распознать ключевые слова.")
+        return
+
+    added = []
+    skipped = []
+
+    for kw in keywords:
+        if kw in data["categories"][cat_name]:
+            skipped.append(kw)
+        else:
+            data["categories"][cat_name].append(kw)
+            added.append(kw)
+
+    save_data(data)
+
+    text = ""
+    if added:
+        text += f"✅ Добавлено в «{cat_name}» ({len(added)}):\n" + "\n".join(f"• {k}" for k in added)
+    if skipped:
+        text += f"\n\n⚠️ Уже были ({len(skipped)}):\n" + "\n".join(f"• {k}" for k in skipped)
+
+    await message.answer(text)
+
 @dp.message(Command("categories"))
 async def cmd_categories(message: Message):
     if message.from_user.id != ADMIN_ID:
@@ -244,6 +304,85 @@ async def cmd_categories(message: Message):
         text += "\n\n"
 
     await message.answer(text, parse_mode="HTML")
+
+# ----- Слова-исключения -----
+
+@dp.message(Command("addexclude"))
+async def cmd_addexclude(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2:
+        await message.answer(
+            "Использование:\n"
+            "/addexclude слово1, слово2, слово3\n\n"
+            "Пример:\n"
+            "/addexclude помогу, сделаю, предлагаю, готов"
+        )
+        return
+
+    raw = parts[1]
+    words = [w.strip().lower() for w in raw.split(",") if w.strip()]
+
+    if not words:
+        await message.answer("Не удалось распознать слова.")
+        return
+
+    added = []
+    skipped = []
+
+    for w in words:
+        if w in data["exclude_words"]:
+            skipped.append(w)
+        else:
+            data["exclude_words"].append(w)
+            added.append(w)
+
+    save_data(data)
+
+    text = ""
+    if added:
+        text += f"🚫 Добавлены исключения ({len(added)}):\n" + "\n".join(f"• {w}" for w in added)
+    if skipped:
+        text += f"\n\n⚠️ Уже были:\n" + "\n".join(f"• {w}" for w in skipped)
+
+    await message.answer(text)
+
+@dp.message(Command("delexclude"))
+async def cmd_delexclude(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2:
+        await message.answer("Использование:\n/delexclude слово")
+        return
+
+    word = parts[1].strip().lower()
+
+    if word not in data["exclude_words"]:
+        await message.answer("Такого слова-исключения нет.")
+        return
+
+    data["exclude_words"].remove(word)
+    save_data(data)
+    await message.answer(f"Слово «{word}» удалено из исключений.")
+
+@dp.message(Command("excludes"))
+async def cmd_excludes(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    words = data.get("exclude_words", [])
+    if not words:
+        await message.answer("Слов-исключений пока нет.")
+        return
+
+    text = "🚫 Слова-исключения:\n\n" + "\n".join(f"• {w}" for w in words)
+    await message.answer(text)
+
+# ----- Чаты -----
 
 @dp.message(Command("addchat"))
 async def cmd_addchat(message: Message):
@@ -304,12 +443,9 @@ async def cmd_chats(message: Message):
 # ========== ПОИСК СООБЩЕНИЙ ==========
 
 async def check_new_messages():
-    """Проверяет новые сообщения в добавленных чатах"""
     if not data.get("chats"):
         return
 
-    # Собираем все ключевые слова по категориям
-    # {keyword: [category1, category2]}
     keyword_map = {}
     for cat_name, keywords in data["categories"].items():
         for kw in keywords:
@@ -321,22 +457,29 @@ async def check_new_messages():
     if not keyword_map:
         return
 
-    # Проверяем только сообщения за последние 10 минут
-    time_from = datetime.utcnow() - timedelta(minutes=10)
+    exclude_words = [w.lower() for w in data.get("exclude_words", [])]
+    time_from = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=15)
 
     for chat_id, chat_info in data["chats"].items():
         try:
-            async for message in app.search_messages(chat_id, limit=30):
+            async for message in app.search_messages(chat_id, limit=20):
                 if not message.text and not message.caption:
                     continue
 
-                # Пропускаем старые сообщения
-                if message.date.replace(tzinfo=None) < time_from:
+                msg_date = message.date.replace(tzinfo=None)
+                if msg_date < time_from:
+                    continue
+
+                msg_key = f"{chat_id}_{message.id}"
+                if msg_key in data["sent_messages"]:
                     continue
 
                 text = (message.text or message.caption or "").lower()
 
-                # Ищем совпадения
+                # Проверка на слова-исключения
+                if any(ex_word in text for ex_word in exclude_words):
+                    continue
+
                 matched_categories = set()
                 for keyword, cats in keyword_map.items():
                     if keyword in text:
@@ -345,7 +488,11 @@ async def check_new_messages():
                 if not matched_categories:
                     continue
 
-                # Формируем ссылки
+                data["sent_messages"].append(msg_key)
+                if len(data["sent_messages"]) > 300:
+                    data["sent_messages"] = data["sent_messages"][-300:]
+                save_data(data)
+
                 try:
                     msg_link = message.link
                 except:
@@ -358,7 +505,6 @@ async def check_new_messages():
                     else:
                         author_link = f"tg://user?id={message.from_user.id}"
 
-                # Отправляем всем, кто подписан на эти категории
                 for cat in matched_categories:
                     for user_id, user_data in data["users"].items():
                         if cat in user_data.get("categories", []):
@@ -367,14 +513,10 @@ async def check_new_messages():
         except FloodWait as e:
             print(f"FloodWait: спим {e.value} секунд")
             await asyncio.sleep(e.value)
-        except RPCError as e:
-            print(f"Ошибка в чате {chat_id}: {e}")
         except Exception as e:
-            print(f"Неизвестная ошибка в чате {chat_id}: {e}")
+            print(f"Ошибка в чате {chat_id}: {e}")
 
 async def send_lead(user_id: str, category: str, text: str, msg_link: str, author_link: str, chat_title: str):
-    """Отправляет найденный лид пользователю"""
-    # Обрезаем слишком длинный текст
     short_text = text[:400] + "..." if len(text) > 400 else text
 
     message_text = f"Категория: {category}\n\n{short_text}\n\n"
@@ -391,23 +533,21 @@ async def send_lead(user_id: str, category: str, text: str, msg_link: str, autho
             parse_mode="Markdown",
             disable_web_page_preview=True
         )
-        await asyncio.sleep(0.05)  # Небольшая пауза между отправками
+        await asyncio.sleep(0.05)
     except Exception as e:
         print(f"Не удалось отправить пользователю {user_id}: {e}")
 
 async def search_loop():
-    """Фоновый цикл поиска"""
     print("Фоновый поиск запущен...")
     while True:
         try:
-            # Запускаем поиск только если есть подписчики
             has_subscribers = any(u.get("categories") for u in data["users"].values())
             if has_subscribers and data.get("chats") and data.get("categories"):
                 await check_new_messages()
         except Exception as e:
             print(f"Ошибка в search_loop: {e}")
 
-        await asyncio.sleep(120)  # Проверяем каждые 2 минуты
+        await asyncio.sleep(120)
 
 # ========== ЗАПУСК ==========
 
@@ -416,9 +556,7 @@ async def main():
     await app.start()
     print("Pyrogram клиент запущен")
 
-    # Запускаем фоновый поиск
     asyncio.create_task(search_loop())
-
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
