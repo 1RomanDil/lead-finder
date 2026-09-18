@@ -282,9 +282,6 @@
     "@POMOGATOR": {
       "title": "2"
     },
-    "https://t.me/+R_KxUQG5hYo5ZjAy": {
-      "title": "про все"
-    },
     "@DESIGN_WORK_FINDER": {
       "title": "1"
     },
@@ -316,6 +313,10 @@
     "@FREELANCE_RABOTA_CHAT_3155895",
     "@JIR_CHAT_3621887",
     "@POMOGATOR_1953212",
-    "@CHATFREELANS_4399364"
-  ]
+    "@CHATFREELANS_4399364",
+    "@FREELANC_RABOTA_3599682",
+    "@CHATFREELANS_4416671",
+    "@JIR_CHAT_3638009"
+  ],
+  "exclude_words": []
 }
