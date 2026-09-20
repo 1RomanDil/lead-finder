@@ -296,15 +296,41 @@ async def cmd_categories(message: Message):
     if message.from_user.id != ADMIN_ID:
         return
 
-    if not data["categories"]:
-        await message.answer("Категорий пока нет.")
+    parts = message.text.split(maxsplit=1)
+
+    # Просто /categories — список категорий
+    if len(parts) == 1:
+        if not data["categories"]:
+            await message.answer("Категорий пока нет.")
+            return
+
+        text = "📂 Список категорий:\n\n"
+        for cat, words in data["categories"].items():
+            text += f"• <b>{cat}</b> — {len(words)} слов\n"
+
+        text += "\nЧтобы посмотреть слова категории:\n/categories Название"
+
+        await message.answer(text, parse_mode="HTML")
         return
 
-    text = "📂 Список категорий:\n\n"
-    for cat, words in data["categories"].items():
-        text += f"<b>{cat}</b>\n"
-        text += ", ".join(words) if words else "нет слов"
-        text += "\n\n"
+    # /categories Название — слова этой категории
+    cat_name = parts[1].strip()
+
+    if cat_name not in data["categories"]:
+        await message.answer("Такой категории нет.")
+        return
+
+    words = data["categories"][cat_name]
+
+    if not words:
+        await message.answer(f"В категории «{cat_name}» пока нет слов.")
+        return
+
+    text = f"<b>{cat_name}</b> ({len(words)} слов):\n\n"
+    text += ", ".join(words)
+
+    if len(text) > 4000:
+        text = text[:4000] + "\n\n... (слишком много слов, показана только часть)"
 
     await message.answer(text, parse_mode="HTML")
 
@@ -473,7 +499,6 @@ async def check_new_messages():
 
                 text = (message.text or message.caption or "").lower()
 
-                # Проверка на слова-исключения
                 if any(ex_word in text for ex_word in exclude_words):
                     continue
 
@@ -558,6 +583,13 @@ async def health():
 
 async def main():
     print("Запускаю бота и поиск...")
+    
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+        print("Webhook удалён")
+    except Exception as e:
+        print(f"Ошибка при удалении webhook: {e}")
+
     await app.start()
     print("Pyrogram клиент запущен")
 
