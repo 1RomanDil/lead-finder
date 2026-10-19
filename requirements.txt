@@ -6,4 +6,5 @@ asyncpg
 python-dotenv
 apscheduler
 uvicorn
-fastapigreenlet
+fastapi
+greenlet
