@@ -17,7 +17,7 @@ import uvicorn
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from sqlalchemy import String, Integer, Text, select, delete, BigInteger
+from sqlalchemy import String, Integer, Text, select, delete
 
 load_dotenv()
 
@@ -28,7 +28,6 @@ API_HASH = os.getenv("API_HASH")
 SESSION_STRING = os.getenv("SESSION_STRING")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Приводим URL к async-формату
 if DATABASE_URL and DATABASE_URL.startswith("postgresql://"):
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
 
@@ -42,8 +41,6 @@ app = Client(
     api_hash=API_HASH,
     in_memory=True
 )
-
-# ========== БАЗА ДАННЫХ ==========
 
 engine = create_async_engine(DATABASE_URL, echo=False)
 Session = async_sessionmaker(engine, expire_on_commit=False)
@@ -77,7 +74,7 @@ class User(Base):
     __tablename__ = "users"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[str] = mapped_column(String(50), unique=True)
-    categories: Mapped[str] = mapped_column(Text, default="[]")  # JSON список
+    categories: Mapped[str] = mapped_column(Text, default="[]")
 
 class SentMessage(Base):
     __tablename__ = "sent_messages"
@@ -93,14 +90,11 @@ async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    # Создаём запись статистики, если её нет
     async with Session() as session:
         result = await session.execute(select(Stat))
         if not result.scalar_one_or_none():
             session.add(Stat(total_starts=0))
             await session.commit()
-
-# ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
 
 async def get_categories_dict():
     async with Session() as session:
@@ -303,7 +297,6 @@ async def cmd_delcat(message: Message):
         await session.execute(delete(Keyword).where(Keyword.category == cat_name))
         await session.delete(cat)
 
-        # Убираем категорию у пользователей
         users = (await session.execute(select(User))).scalars().all()
         for user in users:
             cats = json.loads(user.categories or "[]")
@@ -347,6 +340,39 @@ async def cmd_addword(message: Message):
         await session.commit()
 
     await message.answer(f"Слово «{keyword}» добавлено в «{cat_name}».")
+
+@dp.message(Command("delword"))
+async def cmd_delword(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    parts = message.text.split(maxsplit=2)
+    if len(parts) < 3:
+        await message.answer("Использование:\n/delword Название_категории слово")
+        return
+
+    cat_name = parts[1].strip()
+    keyword = parts[2].strip().lower()
+
+    async with Session() as session:
+        cat = (await session.execute(
+            select(Category).where(Category.name == cat_name)
+        )).scalar_one_or_none()
+        if not cat:
+            await message.answer("Такой категории нет.")
+            return
+
+        kw = (await session.execute(
+            select(Keyword).where(Keyword.category == cat_name, Keyword.word == keyword)
+        )).scalar_one_or_none()
+        if not kw:
+            await message.answer("Такого слова в этой категории нет.")
+            return
+
+        await session.delete(kw)
+        await session.commit()
+
+    await message.answer(f"Слово «{keyword}» удалено из «{cat_name}».")
 
 @dp.message(Command("addwords"))
 async def cmd_addwords(message: Message):
@@ -566,7 +592,7 @@ async def cmd_chats(message: Message):
         text += f"• {chat.title}\n  `{chat.chat_id}`\n\n"
     await message.answer(text, parse_mode="Markdown")
 
-# ========== ПОИСК СООБЩЕНИЙ ==========
+# ========== ПОИСК ==========
 
 async def check_new_messages():
     async with Session() as session:
@@ -616,7 +642,6 @@ async def check_new_messages():
                 if not matched:
                     continue
 
-                # Сохраняем, что уже отправили
                 async with Session() as session:
                     session.add(SentMessage(msg_key=msg_key))
                     await session.commit()
@@ -634,7 +659,6 @@ async def check_new_messages():
                     else:
                         author_link = f"tg://user?id={message.from_user.id}"
 
-                # Кому отправлять
                 async with Session() as session:
                     users = (await session.execute(select(User))).scalars().all()
 
@@ -678,15 +702,11 @@ async def search_loop():
             print(f"Ошибка в search_loop: {e}")
         await asyncio.sleep(120)
 
-# ========== ВЕБ-СЕРВЕР ==========
-
 web_app = FastAPI()
 
 @web_app.get("/")
 async def health():
     return {"status": "ok", "bot": "running"}
-
-# ========== ЗАПУСК ==========
 
 async def main():
     print("Запускаю бота...")
